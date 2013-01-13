@@ -116,8 +116,9 @@ object_class  TEXT(25)
         if ( $app->config( 'DynamicCacheFileInfo' ) ) {
             $file = $app->stash( 'file' );
             $file = md5( $file );
-            $data = $this->get( 'fileinfo_' . $file );
-            $app->stash( 'fileinfo', $data );
+            if ( $data = $this->get( 'fileinfo_' . $file ) ) {
+                $app->stash( 'fileinfo', $data );
+            }
         }
     }
 
