@@ -8,12 +8,13 @@ class DynamicCacheSQLite extends MTPlugin {
         'key'  => 'dynamiccachesqlite',
         'author_name' => 'Alfasado Inc.',
         'author_link' => 'http://alfasado.net/',
-        'version' => '0.2',
+        'version' => '0.3',
         'config_settings' => array(
             'DynamicCacheSQLite' => array( 'default' => 'DynamicMTML.sqlite' ),
             'DynamicCacheLifeTime' => array( 'default' => 3600 ),
             'DynamicCacheFileInfo' => array( 'default' => 1 ),
-            'DynamicCacheContent' => array( 'default' => 0 ),
+            'DynamicCacheConditional' => array( 'default' => 1 ),
+            'DynamicCacheContent' => array( 'default' => 1 ),
             'DynamicCacheContentLifeTime' => array( 'default' => 300 ),
             'DynamicCacheTableName' => array( 'default' => 'session' ),
         ),
@@ -47,11 +48,21 @@ object_class  TEXT(25)
     }
 
     function pre_run ( $mt, $ctx, $args ) {
+        if ( $this->app->config( 'DynamicCacheConditional' ) ) {
+            $file = $args[ 'file' ];
+            if ( file_exists( $file ) ) {
+                $filemtime = filemtime( $file );
+                $this->app->do_conditional( $filemtime );
+            }
+        }
         if ( $this->app->config( 'DynamicCacheContent' ) ) {
             $url = $args[ 'url' ];
             $url = md5( $url );
             $lifetime = $this->app->config( 'DynamicCacheContentLifeTime' );
             if ( $content = $this->get( 'content_' . $url, $lifetime ) ) {
+                $extension = $args[ 'extension' ];
+                $contenttype = $this->app->get_mime_type( $extension );
+                $this->app->send_http_header( $contenttype, $filemtime, strlen( $content ) );
                 echo $content;
                 exit();
             }
