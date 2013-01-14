@@ -8,15 +8,18 @@ class DynamicCacheSQLite extends MTPlugin {
         'key'  => 'dynamiccachesqlite',
         'author_name' => 'Alfasado Inc.',
         'author_link' => 'http://alfasado.net/',
-        'version' => '0.1',
-        'config_settings' => array( // mt-config.cgi
+        'version' => '0.2',
+        'config_settings' => array(
             'DynamicCacheSQLite' => array( 'default' => 'DynamicMTML.sqlite' ),
             'DynamicCacheLifeTime' => array( 'default' => 3600 ),
             'DynamicCacheFileInfo' => array( 'default' => 1 ),
+            'DynamicCacheContent' => array( 'default' => 0 ),
+            'DynamicCacheContentLifeTime' => array( 'default' => 300 ),
             'DynamicCacheTableName' => array( 'default' => 'session' ),
         ),
         'callbacks' => array(
             'init_app' => 'init_app',
+            'pre_run' => 'pre_run',
             'take_down' => 'take_down',
             'pre_resolve_url' => 'pre_resolve_url',
             'post_resolve_url' => 'post_resolve_url',
@@ -24,8 +27,8 @@ class DynamicCacheSQLite extends MTPlugin {
     );
 
 /*
-key           TEXT(255 primary key with index)
-value         MEDIUMTEXT(16777215)
+key           TEXT(255 PRIMARY KEY)
+value         MEDIUMBLOB
 type          TEXT(25)
 starttime     INTEGER
 object_class  TEXT(25)
@@ -40,6 +43,19 @@ object_class  TEXT(25)
             $this->sqlite = sqlite_open( $db, 0666, $error );
             $this->lifetime = $this->app->config( 'DynamicCacheLifeTime' );
             $this->app->stash( '__cache_sqlite', $this );
+        }
+    }
+
+    function pre_run ( $mt, $ctx, $args ) {
+        if ( $this->app->config( 'DynamicCacheContent' ) ) {
+            $url = $args[ 'url' ];
+            $url = md5( $url );
+            $lifetime = $this->app->config( 'DynamicCacheContentLifeTime' );
+            if ( $content = $this->get( 'content_' . $url, $lifetime ) ) {
+                echo $content;
+                exit();
+            }
+            $this->app->stash( '__cache_content', 'content_' . $url );
         }
     }
 
@@ -138,6 +154,10 @@ object_class  TEXT(25)
     }
 
     function take_down ( $mt, $ctx, $args, $content ) {
+        $app = $ctx->stash( 'bootstrapper' );
+        if ( $key = $app->stash( '__cache_content' ) ) {
+            $this->put( $key, $content );
+        }
         sqlite_close( $this->sqlite );
     }
 }
