@@ -135,8 +135,11 @@ object_class  TEXT(25)
         if ( $app->config( 'DynamicCacheFileInfo' ) ) {
             $file = $app->stash( 'file' );
             $file = md5( $file );
-            if ( $data = $this->get( 'fileinfo_' . $file ) ) {
+            $key = 'fileinfo_' . $file;
+            $app->stash( '__cached_fileinfo_key', $key );
+            if ( $data = $this->get( $key ) ) {
                 $app->stash( 'fileinfo', $data );
+                $app->stash( '__cached_fileinfo', 1 );
             }
         }
     }
@@ -144,11 +147,12 @@ object_class  TEXT(25)
     function post_resolve_url ( $mt, $ctx, $args ) {
         $app = $ctx->stash( 'bootstrapper' );
         if ( $app->config( 'DynamicCacheFileInfo' ) ) {
-            $data = $app->stash( 'fileinfo' );
-            if ( $data ) {
-                $file = $app->stash( 'file' );
-                $file = md5( $file );
-                $this->put( 'fileinfo_' . $file, $data );
+            if (! $app->stash( '__cached_fileinfo' ) ) {
+                $data = $app->stash( 'fileinfo' );
+                if ( $data ) {
+                    $key = $app->stash( '__cached_fileinfo_key' );
+                    $this->put( $key, $data );
+                }
             }
         }
     }
