@@ -40,10 +40,13 @@ object_class  TEXT(25)
             $this->sqlite = sqlite_open( $db, 0666, $error );
             $this->lifetime = $this->app->config( 'DynamicCacheLifeTime' );
             $this->app->stash( '__cache_sqlite', $this );
+            $this->clear( 'blog_1' );
+            $this->clear( 'fileinfo_a92e923d40abf7b3a6d6e1fed33f899a' );
+            exit();
         }
     }
 
-    function get ( $key ) {
+    function get ( $key, $expires = NULL ) {
         $table = $this->app->config( 'DynamicCacheTableName' );
         $sql = 'SELECT * FROM ' . $table . ' WHERE key="' . $key . '"';
         $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error );
@@ -51,7 +54,10 @@ object_class  TEXT(25)
             $value = $rows[ 'value' ];
             $type = $rows[ 'type' ];
             $starttime = $rows[ 'starttime' ];
-            if ( ( $starttime +  $this->lifetime ) < time() ) {
+            if (! $expires ) {
+                $expires = $this->lifetime;
+            }
+            if ( ( $starttime + $expires ) < time() ) {
                 $this->clear( $key );
                 return NULL;
             }
@@ -134,7 +140,7 @@ object_class  TEXT(25)
         }
     }
 
-    function take_down () {
+    function take_down ( $mt, $ctx, $args, $content ) {
         sqlite_close( $this->sqlite );
     }
 }
