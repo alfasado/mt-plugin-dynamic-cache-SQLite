@@ -40,9 +40,6 @@ object_class  TEXT(25)
             $this->sqlite = sqlite_open( $db, 0666, $error );
             $this->lifetime = $this->app->config( 'DynamicCacheLifeTime' );
             $this->app->stash( '__cache_sqlite', $this );
-            $this->clear( 'blog_1' );
-            $this->clear( 'fileinfo_a92e923d40abf7b3a6d6e1fed33f899a' );
-            exit();
         }
     }
 
