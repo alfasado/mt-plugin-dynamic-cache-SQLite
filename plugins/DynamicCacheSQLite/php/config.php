@@ -8,7 +8,7 @@ class DynamicCacheSQLite extends MTPlugin {
         'key'  => 'dynamiccachesqlite',
         'author_name' => 'Alfasado Inc.',
         'author_link' => 'http://alfasado.net/',
-        'version' => '0.6',
+        'version' => '0.7',
         'config_settings' => array(
             'DynamicCacheSQLite' => array( 'default' => 'DynamicMTML.sqlite' ),
             'DynamicCacheLifeTime' => array( 'default' => 3600 ),
@@ -73,13 +73,13 @@ object_class  TEXT(25)
             $url = md5( $url );
             $lifetime = $this->app->config( 'DynamicCacheContentLifeTime' );
             $key = 'content_' . $url;
-            $raws = $this->get( $key, $lifetime, 1 );
-            if ( $raws ) {
-                $starttime = $raws[ 'starttime' ];
+            $rows = $this->get( $key, $lifetime, 1 );
+            if ( $rows ) {
+                $starttime = $rows[ 'starttime' ];
                 if ( ( $filemtime ) && ( $filemtime > $starttime ) ) {
                     $this->clear( $key );
                 } else {
-                    $content = $raws[ 'value' ];
+                    $content = $rows[ 'value' ];
                     $extension = $args[ 'extension' ];
                     $contenttype = $this->app->get_mime_type( $extension );
                     $this->app->send_http_header( $contenttype, $filemtime, strlen( $content ) );
@@ -98,7 +98,7 @@ object_class  TEXT(25)
         $table = $this->app->config( 'DynamicCacheTableName' );
         $sql = 'SELECT * FROM ' . $table . ' WHERE key="' . $key . '" LIMIT 1';
         $sql_key = md5( $sql );
-        if ( $raws = $this->app->stash( '__sqlite_cache_' . $sql_key ) ) {
+        if ( $rows = $this->app->stash( '__sqlite_cache_' . $sql_key ) ) {
             $value = $rows[ 'value' ];
             $type = $rows[ 'type' ];
             if ( $type == 'SER' ) {
@@ -174,8 +174,8 @@ object_class  TEXT(25)
         $table = $this->app->config( 'DynamicCacheTableName' );
         $sql = 'SELECT * FROM ' . $table . ' WHERE key="' . $key . '" LIMIT 1';
         $sql_key = md5( $sql );
-        $raws;
-        if ( $raws = $this->app->stash( '__sqlite_cache_' . $sql_key ) ) {
+        $rows;
+        if ( $rows = $this->app->stash( '__sqlite_cache_' . $sql_key ) ) {
         } else {
             if ( $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error ) ) {
                 $rows = sqlite_fetch_array( $result, SQLITE_ASSOC );
