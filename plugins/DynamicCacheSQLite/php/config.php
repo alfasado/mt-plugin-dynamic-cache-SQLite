@@ -8,13 +8,13 @@ class DynamicCacheSQLite extends MTPlugin {
         'key'  => 'dynamiccachesqlite',
         'author_name' => 'Alfasado Inc.',
         'author_link' => 'http://alfasado.net/',
-        'version' => '0.5',
+        'version' => '0.6',
         'config_settings' => array(
             'DynamicCacheSQLite' => array( 'default' => 'DynamicMTML.sqlite' ),
             'DynamicCacheLifeTime' => array( 'default' => 3600 ),
             'DynamicCacheFileInfo' => array( 'default' => 1 ),
             'DynamicCacheConditional' => array( 'default' => 0 ),
-            'DynamicCacheContent' => array( 'default' => 1 ),
+            'DynamicCacheContent' => array( 'default' => 0 ),
             'DynamicCacheContentLifeTime' => array( 'default' => 300 ),
             'DynamicCacheTableName' => array( 'default' => 'session' ),
         ),
@@ -41,24 +41,30 @@ object_class  TEXT(25)
 
     function init_app () {
         if ( $db = $this->app->config( 'DynamicCacheSQLite' ) ) {
-            $this->sqlite = sqlite_open( $db, 0666, $error );
-            $this->lifetime = $this->app->config( 'DynamicCacheLifeTime' );
-            $this->app->stash( '__cache_sqlite', $this );
-            // $this->clear( 'blog_1' );
-            // $this->clear( 'fileinfo_a92e923d40abf7b3a6d6e1fed33f899a' );
-            // $this->clear( 'content_9ba37e0a8d5b7dc333c8ae0822e9d22e' );
-            // exit();
+            if ( $conn = sqlite_open( $db, 0666, $error ) ) {
+                $this->sqlite = $conn;
+                $this->lifetime = $this->app->config( 'DynamicCacheLifeTime' );
+                $this->app->stash( '__cache_sqlite', $this );
+                /*
+                $this->clear( 'blog_1' );
+                $this->clear( 'fileinfo_a92e923d40abf7b3a6d6e1fed33f899a' );
+                $this->clear( 'content_9ba37e0a8d5b7dc333c8ae0822e9d22e' );
+                sqlite_query( $this->sqlite, 'COMMIT' );
+                exit();
+                */
+            }
         }
     }
 
     function pre_run ( $mt, $ctx, $args ) {
         if (! $this->sqlite ) {
-            return NULL;
+            return;
         }
-        if ( $this->app->config( 'DynamicCacheConditional' ) ) {
-            $file = $args[ 'file' ];
-            if ( file_exists( $file ) ) {
-                $filemtime = filemtime( $file );
+        $filemtime;
+        $file = $args[ 'file' ];
+        if ( file_exists( $file ) ) {
+            $filemtime = filemtime( $file );
+            if ( $this->app->config( 'DynamicCacheConditional' ) ) {
                 $this->app->do_conditional( $filemtime );
             }
         }
@@ -66,46 +72,81 @@ object_class  TEXT(25)
             $url = $args[ 'url' ];
             $url = md5( $url );
             $lifetime = $this->app->config( 'DynamicCacheContentLifeTime' );
-            if ( $content = $this->get( 'content_' . $url, $lifetime ) ) {
-                $extension = $args[ 'extension' ];
-                $contenttype = $this->app->get_mime_type( $extension );
-                $this->app->send_http_header( $contenttype, $filemtime, strlen( $content ) );
-                echo $content;
-                exit();
+            $key = 'content_' . $url;
+            $raws = $this->get( $key, $lifetime, 1 );
+            if ( $raws ) {
+                $starttime = $raws[ 'starttime' ];
+                if ( ( $filemtime ) && ( $filemtime > $starttime ) ) {
+                    $this->clear( $key );
+                } else {
+                    $content = $raws[ 'value' ];
+                    $extension = $args[ 'extension' ];
+                    $contenttype = $this->app->get_mime_type( $extension );
+                    $this->app->send_http_header( $contenttype, $filemtime, strlen( $content ) );
+                    echo $content;
+                    exit();
+                }
             }
             $this->app->stash( '__cache_content', 'content_' . $url );
         }
     }
 
-    function get ( $key, $expires = NULL ) {
+    function get ( $key, $expires = NULL, $wantarray = NULL ) {
         if (! $this->sqlite ) {
             return NULL;
         }
         $table = $this->app->config( 'DynamicCacheTableName' );
         $sql = 'SELECT * FROM ' . $table . ' WHERE key="' . $key . '" LIMIT 1';
-        $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error );
-        if ( $rows = sqlite_fetch_array( $result, SQLITE_ASSOC ) ) {
+        $sql_key = md5( $sql );
+        if ( $raws = $this->app->stash( '__sqlite_cache_' . $sql_key ) ) {
             $value = $rows[ 'value' ];
             $type = $rows[ 'type' ];
-            $starttime = $rows[ 'starttime' ];
-            if (! $expires ) {
-                $expires = $this->lifetime;
-            }
-            if ( ( $starttime + $expires ) < time() ) {
-                $this->clear( $key );
-                return NULL;
-            }
             if ( $type == 'SER' ) {
                 $object_class = $rows[ 'object_class' ];
                 if ( $object_class ) {
                     require_once( 'class.' . $object_class . '.php' );
                 }
-                return unserialize( $value );
+                $value = unserialize( $value );
+            }
+            if ( $wantarray ) {
+                $rows[ 'value' ] = $value;
+                return $rows;
             } else {
                 return $value;
             }
         } else {
-            return NULL;
+            $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error );
+            if (! $result ) {
+                return NULL;
+            }
+            if ( $rows = sqlite_fetch_array( $result, SQLITE_ASSOC ) ) {
+                $this->app->stash( '__sqlite_cache_' . $sql_key, $rows );
+                $value = $rows[ 'value' ];
+                $type = $rows[ 'type' ];
+                $starttime = $rows[ 'starttime' ];
+                if (! $expires ) {
+                    $expires = $this->lifetime;
+                }
+                if ( ( $starttime + $expires ) < time() ) {
+                    $this->clear( $key );
+                    return NULL;
+                }
+                if ( $type == 'SER' ) {
+                    $object_class = $rows[ 'object_class' ];
+                    if ( $object_class ) {
+                        require_once( 'class.' . $object_class . '.php' );
+                    }
+                    $value = unserialize( $value );
+                }
+                if ( $wantarray ) {
+                    $rows[ 'value' ] = $value;
+                    return $rows;
+                } else {
+                    return $value;
+                }
+            } else {
+                return NULL;
+            }
         }
     }
 
@@ -113,10 +154,9 @@ object_class  TEXT(25)
         if (! $this->sqlite ) {
             return NULL;
         }
-        if (! $this->app->stash( '__sqlite_put' ) ) {
+        if (! $this->app->stash( '__sqlite_update' ) ) {
             sqlite_query( $this->sqlite, 'BEGIN' );
         }
-        $this->app->stash( '__sqlite_put', 1 );
         $type;
         $object_class;
         if ( is_array( $value ) ) {
@@ -133,8 +173,16 @@ object_class  TEXT(25)
         $result_flag = NULL;
         $table = $this->app->config( 'DynamicCacheTableName' );
         $sql = 'SELECT * FROM ' . $table . ' WHERE key="' . $key . '" LIMIT 1';
-        $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error );
-        if ( $rows = sqlite_fetch_array( $result, SQLITE_ASSOC ) ) {
+        $sql_key = md5( $sql );
+        $raws;
+        if ( $raws = $this->app->stash( '__sqlite_cache_' . $sql_key ) ) {
+        } else {
+            if ( $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error ) ) {
+                $rows = sqlite_fetch_array( $result, SQLITE_ASSOC );
+                $this->app->stash( '__sqlite_cache_' . $sql_key, $rows );
+            }
+        }
+        if ( $rows ) {
             $sql = sprintf( "UPDATE ${table} SET value = '%s', starttime = '%s', type = '%s', object_class = '%s' WHERE key = '%s'",
                                                     sqlite_escape_string( $value ), time(), $type, $object_class, $key );
             $result_flag = sqlite_exec( $this->sqlite, $sql, $error );
@@ -143,6 +191,12 @@ object_class  TEXT(25)
                                                     $key, sqlite_escape_string( $value ), time(), $type, $object_class );
             $result_flag = sqlite_exec( $this->sqlite, $sql, $error );
         }
+        if (! $result_flag ) {
+            sqlite_query( $this->sqlite, 'ROLLBACK' );
+            return NULL;
+        } else {
+            $this->app->stash( '__sqlite_update', 1 );
+        }
         return $result_flag;
     }
 
@@ -150,13 +204,31 @@ object_class  TEXT(25)
         if (! $this->sqlite ) {
             return NULL;
         }
+        if (! $this->app->stash( '__sqlite_update' ) ) {
+            sqlite_query( $this->sqlite, 'BEGIN' );
+        }
         $table = $this->app->config( 'DynamicCacheTableName' );
-        $sql = 'SELECT * FROM ' . $table . ' WHERE key="' . $key . '"';
-        $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error );
+        $sql = 'SELECT * FROM ' . $table . ' WHERE key="' . $key . '" LIMIT 1';
+        $sql_md5 = md5( $sql );
+        $result;
+        if ( $result = $this->app->stash( '__sqlite_query_cache_' . $sql_md5 ) ) {
+        } else {
+            $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error );
+        }
+        if (! $result ) {
+            $this->app->stash( '__sqlite_query_cache_' . $sql_md5, NULL );
+            return NULL;
+        }
+        $this->app->stash( '__sqlite_query_cache_' . $sql_md5, NULL );
         $result_flag = NULL;
         if ( $rows = sqlite_fetch_array( $result, SQLITE_ASSOC ) ) {
             $sql = 'DELETE FROM ' . $table . ' WHERE key="' . $key . '"';
             $result_flag = sqlite_exec( $this->sqlite, $sql, $error );
+            if (! $result_flag ) {
+                sqlite_query( $this->sqlite, 'ROLLBACK' );
+            } else {
+                $this->app->stash( '__sqlite_update', 1 );
+            }
         }
         return $result_flag;
     }
@@ -202,7 +274,7 @@ object_class  TEXT(25)
         if ( $key = $app->stash( '__cache_content' ) ) {
             $this->put( $key, $content );
         }
-        if ( $app->stash( '__sqlite_put' ) ) {
+        if ( $this->app->stash( '__sqlite_update' ) ) {
             sqlite_query( $this->sqlite, 'COMMIT' );
         }
         sqlite_close( $this->sqlite );
