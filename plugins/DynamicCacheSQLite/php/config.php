@@ -8,7 +8,7 @@ class DynamicCacheSQLite extends MTPlugin {
         'key'  => 'dynamiccachesqlite',
         'author_name' => 'Alfasado Inc.',
         'author_link' => 'http://alfasado.net/',
-        'version' => '0.7',
+        'version' => '0.8',
         'config_settings' => array(
             'DynamicCacheSQLite' => array( 'default' => 'DynamicMTML.sqlite' ),
             'DynamicCacheLifeTime' => array( 'default' => 3600 ),
@@ -33,6 +33,8 @@ value         MEDIUMBLOB
 type          TEXT(25)
 starttime     INTEGER
 object_class  TEXT(25)
+
+TODO::MultiDevice, with Parameter
 */
 
     var $app;
@@ -41,7 +43,20 @@ object_class  TEXT(25)
 
     function init_app () {
         if ( $db = $this->app->config( 'DynamicCacheSQLite' ) ) {
+            $create;
+            if (! file_exists( $db ) ) {
+                $create = 1;
+            }
             if ( $conn = sqlite_open( $db, 0666, $error ) ) {
+                if ( $create ) {
+                    $table = $this->app->config( 'DynamicCacheTableName' );
+                    $sql = "CREATE table ${table} (key TEXT(255) PRIMARY KEY,";
+                    $sql .= " value MEDIUMBLOB, type TEXT(25), starttime INTEGER, object_class TEXT(25))";
+                    $result_flag = sqlite_query( $conn, $sql, SQLITE_BOTH, $error );
+                    if ( $error ) {
+                        return;
+                    }
+                }
                 $this->sqlite = $conn;
                 $this->lifetime = $this->app->config( 'DynamicCacheLifeTime' );
                 $this->app->stash( '__cache_sqlite', $this );
