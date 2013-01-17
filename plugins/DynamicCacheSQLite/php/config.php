@@ -14,8 +14,8 @@ class DynamicCacheSQLite extends MTPlugin {
             'DynamicCacheLifeTime' => array( 'default' => 3600 ),
             'DynamicCacheFileInfo' => array( 'default' => 1 ),
             'DynamicCacheConditional' => array( 'default' => 0 ),
-            'DynamicCacheContent' => array( 'default' => 0 ),
-            'DynamicCacheContentLifeTime' => array( 'default' => 300 ),
+            'DynamicCacheContent' => array( 'default' => 1 ),
+            'DynamicCacheContentLifeTime' => array( 'default' => 30 ),
             'DynamicCacheTableName' => array( 'default' => 'session' ),
         ),
         'callbacks' => array(
@@ -43,6 +43,12 @@ TODO::MultiDevice, with Parameter
 
     function init_app () {
         if ( $db = $this->app->config( 'DynamicCacheSQLite' ) ) {
+            $app = $this->app;
+            $args = array( 'do' => 1, 'key' => $key, 'expires' => $expires );
+            $this->app->run_callbacks( 'pre_sqlite_init', $app->mt, $app->ctx, $args );
+            if (! $args[ 'do' ] ) {
+                return;
+            }
             $create;
             if (! file_exists( $db ) ) {
                 $create = 1;
@@ -59,7 +65,7 @@ TODO::MultiDevice, with Parameter
                 }
                 $this->sqlite = $conn;
                 $this->lifetime = $this->app->config( 'DynamicCacheLifeTime' );
-                $this->app->stash( '__cache_sqlite', $this );
+                $app->stash( '__cache_sqlite', $this );
                 /*
                 $this->clear( 'blog_1' );
                 $this->clear( 'fileinfo_a92e923d40abf7b3a6d6e1fed33f899a' );
@@ -108,6 +114,12 @@ TODO::MultiDevice, with Parameter
 
     function get ( $key, $expires = NULL, $wantarray = NULL ) {
         if (! $this->sqlite ) {
+            return NULL;
+        }
+        $app = $this->app;
+        $args = array( 'do' => 1, 'key' => $key, 'expires' => $expires );
+        $this->app->run_callbacks( 'pre_sqlite_get', $app->mt, $app->ctx, $args );
+        if (! $args[ 'do' ] ) {
             return NULL;
         }
         $table = $this->app->config( 'DynamicCacheTableName' );
