@@ -45,13 +45,9 @@ class DynamicCacheSQLite extends MTPlugin {
             $this->debug = 1;
         }
         if ( $db = $app->config( 'DynamicCacheSQLite' ) ) {
-            $app->stash( '__sqlite_key', $key );
-            $app->stash( '__sqlite_expires', $expires );
             $app->stash( '__sqlite_do', 1 );
             $app->run_callbacks( 'pre_sqlite_init' );
             $do = $app->stash( '__sqlite_do' );
-            $app->stash( '__sqlite_key', NULL );
-            $app->stash( '__sqlite_expires', NULL );
             $app->stash( '__sqlite_do', NULL );
             if (! $do ) {
                 return NULL;
@@ -74,7 +70,7 @@ class DynamicCacheSQLite extends MTPlugin {
                 }
                 $this->sqlite = $conn;
                 if ( $this->debug ) {
-                    $sql = "SELECT * FROM '${table}' LIMIT 0, 1000;";
+                    $sql = "SELECT * FROM '${table}' LIMIT 0, 50;";
                     $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error );
                     while ( $rows = sqlite_fetch_array( $result, SQLITE_ASSOC ) ) {
                         echo( $rows[ 'key' ] . "\t|\t" . $rows[ 'object_class' ] ) . "\t|\t";
