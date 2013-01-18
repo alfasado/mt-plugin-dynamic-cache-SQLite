@@ -10,12 +10,15 @@ class DynamicCacheSQLite extends MTPlugin {
         'author_link' => 'http://alfasado.net/',
         'version' => '1.0',
         'config_settings' => array(
-            'DynamicCacheSQLite' => array( 'default' => 'DynamicMTML.sqlite' ),
-            'DynamicCacheLifeTime' => array( 'default' => 10800 ),
+            'DynamicCacheSQLite' => array( 'default' => '/psth/to/DynamicMTML.sqlite' ),
+            'DynamicCacheLifeTime' => array( 'default' => 7200 ),
             'DynamicCacheFileInfo' => array( 'default' => 1 ),
+            'DynamicCacheBlog' => array( 'default' => 1 ),
+            'DynamicCacheArchiveObjects' => array( 'default' => '' ),
+            'DynamicCacheArchiveObjectLifeTime' => array( 'default' => 1800 ),
             'DynamicCacheConditional' => array( 'default' => 1 ),
             'DynamicCacheContent' => array( 'default' => 1 ),
-            'DynamicCacheContentLifeTime' => array( 'default' => 180 ),
+            'DynamicCacheContentLifeTime' => array( 'default' => 3600 ),
             'DynamicCacheTableName' => array( 'default' => 'session' ),
             'DynamicCacheDebugMode' => array( 'default' => 0 ),
             'DynamicCacheIfNonMatchFI' => array( 'default' => 'index.html' ),
@@ -23,9 +26,11 @@ class DynamicCacheSQLite extends MTPlugin {
         'callbacks' => array(
             'init_app' => 'init_app',
             'pre_run' => 'pre_run',
+            'init_db' => 'init_db',
             'take_down' => 'take_down',
             'pre_resolve_url' => 'pre_resolve_url',
             'post_resolve_url' => 'post_resolve_url',
+            'build_page' => 'build_page',
         ),
     );
 
@@ -59,7 +64,9 @@ class DynamicCacheSQLite extends MTPlugin {
                 if ( $create ) {
                     $table = $app->config( 'DynamicCacheTableName' );
                     $sql = "CREATE table ${table} (key TEXT(255) PRIMARY KEY,";
-                    $sql .= " value MEDIUMBLOB, type TEXT(25), starttime INTEGER, object_class TEXT(25))";
+                    $sql .= " value MEDIUMBLOB, template MEDIUMBLOB, type TEXT(25),";
+                    $sql .= " is_file INTEGER, file_ts INTEGER, starttime INTEGER,";
+                    $sql .= " object_class TEXT(25))";
                     $result_flag = sqlite_query( $conn, $sql, SQLITE_BOTH, $error );
                     if ( $error ) {
                         return;
@@ -67,7 +74,7 @@ class DynamicCacheSQLite extends MTPlugin {
                 }
                 $this->sqlite = $conn;
                 if ( $this->debug ) {
-                    $sql = "SELECT * FROM 'session' LIMIT 0, 1000;";
+                    $sql = "SELECT * FROM '${table}' LIMIT 0, 1000;";
                     $result = sqlite_query( $this->sqlite, $sql, SQLITE_BOTH, $error );
                     while ( $rows = sqlite_fetch_array( $result, SQLITE_ASSOC ) ) {
                         echo( $rows[ 'key' ] . "\t|\t" . $rows[ 'object_class' ] ) . "\t|\t";
@@ -96,7 +103,9 @@ class DynamicCacheSQLite extends MTPlugin {
         $filemtime;
         $file = $args[ 'file' ];
         if ( file_exists( $file ) ) {
+            $app->stash( '__file_exists', 1 );
             $filemtime = filemtime( $file );
+            $app->stash( '__file_filemtime', $filemtime );
             if ( $app->config( 'DynamicCacheConditional' ) ) {
                 $app->do_conditional( $filemtime );
             }
@@ -106,12 +115,17 @@ class DynamicCacheSQLite extends MTPlugin {
             $url = md5( $url );
             $lifetime = $app->config( 'DynamicCacheContentLifeTime' );
             $key = 'content_' . $url;
-            $rows = $this->get( $key, $lifetime, 1 );
+            $rows = $this->get( $key, array( 'wantarray' => 1, 'expires' => $lifetime ) );
             if ( $rows ) {
                 $starttime = $rows[ 'starttime' ];
                 if ( ( $filemtime ) && ( $filemtime > $starttime ) ) {
                     $this->clear( $key );
                 } else {
+                    if ( $filemtime ) {
+                        if ( $app->config( 'DynamicCacheConditional' ) ) {
+                            $app->do_conditional( $filemtime );
+                        }
+                    }
                     $content = $rows[ 'value' ];
                     $extension = $args[ 'extension' ];
                     $contenttype = $app->get_mime_type( $extension );
@@ -124,7 +138,31 @@ class DynamicCacheSQLite extends MTPlugin {
         }
     }
 
-    function get ( $key, $expires = NULL, $wantarray = NULL ) {
+    function init_db ( $mt, &$ctx, $args ) {
+        $app = $this->app;
+        if ( $app->config( 'DynamicCacheBlog' ) ) {
+            if ( $blog_id = $args[ 'blog_id' ] ) {
+                $blog_key = 'blog_' . $blog_id;
+                if (! $blog = $this->get( $blog_key ) ) {
+                    $blog = $mt->db()->fetch_blog( $blog_id );
+                    $this->put( $blog_key, $blog );
+                } else {
+                    $ctx->stash( 'blog', $blog );
+                }
+            }
+        }
+    }
+
+    function get ( $key, $args = NULL, $wantarray = NULL ) {
+        if ( is_array( $args ) && isset( $args[ 'expires' ] ) ) {
+            $expires = $args[ 'expires' ];
+        }
+        if ( is_array( $args ) && isset( $args[ 'wantarray' ] ) ) {
+            $wantarray = $args[ 'wantarray' ];
+        }
+        if (! is_array( $args ) ) {
+            $expires = $args;
+        }
         if (! $this->sqlite ) {
             return NULL;
         }
@@ -154,6 +192,7 @@ class DynamicCacheSQLite extends MTPlugin {
         $sql_key = md5( $sql );
         if ( $rows = $app->stash( '__sqlite_cache_' . $sql_key ) ) {
             $value = $rows[ 'value' ];
+            $template = $rows[ 'template' ];
             $type = $rows[ 'type' ];
             if ( $type == 'SER' ) {
                 $object_class = $rows[ 'object_class' ];
@@ -161,9 +200,14 @@ class DynamicCacheSQLite extends MTPlugin {
                     require_once( 'class.' . $object_class . '.php' );
                 }
                 $value = unserialize( $value );
+                if ( $template ) {
+                    require_once( 'class.mt_template.php' );
+                    $template = unserialize( $template );
+                }
             }
             if ( $wantarray ) {
                 $rows[ 'value' ] = $value;
+                $rows[ 'template' ] = $template;
                 return $rows;
             } else {
                 return $value;
@@ -176,6 +220,7 @@ class DynamicCacheSQLite extends MTPlugin {
             if ( $rows = sqlite_fetch_array( $result, SQLITE_ASSOC ) ) {
                 $app->stash( '__sqlite_cache_' . $sql_key, $rows );
                 $value = $rows[ 'value' ];
+                $template = $rows[ 'template' ];
                 $type = $rows[ 'type' ];
                 $starttime = $rows[ 'starttime' ];
                 if (! $expires ) {
@@ -187,16 +232,22 @@ class DynamicCacheSQLite extends MTPlugin {
                 }
                 if ( $type == 'SER' ) {
                     $object_class = $rows[ 'object_class' ];
+                    
                     if ( $object_class ) {
                         require_once( 'class.' . $object_class . '.php' );
                     }
                     $value = unserialize( $value );
+                    if ( $template ) {
+                        require_once( 'class.mt_template.php' );
+                        $template = unserialize( $template );
+                    }
                 }
                 if ( $this->debug ) {
                     echo "success";
                 }
                 if ( $wantarray ) {
                     $rows[ 'value' ] = $value;
+                    $rows[ 'template' ] = $template;
                     return $rows;
                 } else {
                     return $value;
@@ -207,11 +258,18 @@ class DynamicCacheSQLite extends MTPlugin {
         }
     }
 
-    function put ( $key, $value ) {
+    function put ( $key, $value, $template = NULL ) {
         if (! $this->sqlite ) {
             return NULL;
         }
         $app = $this->app;
+        $pos = strpos( $key, 'fileinfo_' );
+        if ( $pos !== FALSE ) {
+            $is_file = $app->stash( '__file_exists' );
+            $file_ts = $app->stash( '__file_filemtime' );
+        } else {
+            $is_file = 0;
+        }
         $app->stash( '__sqlite_key', $key );
         $app->stash( '__sqlite_expires', $expires );
         $app->stash( '__sqlite_do', 1 );
@@ -244,6 +302,9 @@ class DynamicCacheSQLite extends MTPlugin {
         }
         if ( $type == 'SER' ) {
             $value = serialize( $value );
+            if ( $template ) {
+                $template = serialize( $template );
+            }
         }
         $result_flag = NULL;
         $table = $app->config( 'DynamicCacheTableName' );
@@ -261,12 +322,12 @@ class DynamicCacheSQLite extends MTPlugin {
             }
         }
         if ( $rows ) {
-            $sql = sprintf( "UPDATE ${table} SET value = '%s', starttime = '%s', type = '%s', object_class = '%s' WHERE key = '%s'",
-                                                    sqlite_escape_string( $value ), time(), $type, $object_class, $key );
+            $sql = sprintf( "UPDATE ${table} SET value = '%s', template = %s, is_file = ${is_file}, file_ts = ${file_ts}, starttime = '%s', type = '%s', object_class = '%s' WHERE key = '%s'",
+            sqlite_escape_string( $value ), sqlite_escape_string( $template ), time(), $type, $object_class, $key );
             $result_flag = sqlite_exec( $this->sqlite, $sql, $error );
         } else {
-            $sql = sprintf( "INSERT INTO ${table} (key, value, starttime, type, object_class) VALUES ('%s', '%s', '%s', '%s', '%s')",
-                                                    $key, sqlite_escape_string( $value ), time(), $type, $object_class );
+            $sql = sprintf( "INSERT INTO ${table} (key, value, template, is_file, file_ts, starttime, type, object_class) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
+            $key, sqlite_escape_string( $value ), sqlite_escape_string( $template ), $is_file, $file_ts, time(), $type, $object_class );
             $app->stash( '__sqlite_delete_' . $sql_key, NULL );
             $result_flag = sqlite_exec( $this->sqlite, $sql, $error );
         }
@@ -349,7 +410,25 @@ class DynamicCacheSQLite extends MTPlugin {
             $file = md5( $file );
             $key = 'fileinfo_' . $file;
             $app->stash( '__cached_fileinfo_key', $key );
-            if ( $data = $this->get( $key ) ) {
+            if ( $fileinfo = $this->get( $key, array( 'wantarray' => 1 ) ) ) {
+                $is_file = $fileinfo[ 'is_file' ];
+                if ( $is_file && (! $app->stash( '__file_exists' ) ) ) {
+                    $this->clear( $key );
+                    return;
+                }
+                $file_ts = $fileinfo[ 'file_ts' ];
+                $filemtime = $app->stash( '__file_filemtime' );
+                if ( $file_ts && $filemtime ) {
+                    if ( $file_ts != $filemtime ) {
+                        $this->clear( $key );
+                        return;
+                    }
+                }
+                $data = $fileinfo[ 'value' ];
+                $template = $fileinfo[ 'template' ];
+                if ( $template ) {
+                    $ctx->stash( 'template', $template );
+                }
                 $app->stash( 'fileinfo', $data );
                 $app->stash( '__cached_fileinfo', 1 );
             }
@@ -361,13 +440,18 @@ class DynamicCacheSQLite extends MTPlugin {
             return;
         }
         $app = $this->app;
+        $data = $app->stash( 'fileinfo' );
         if ( $app->config( 'DynamicCacheFileInfo' ) ) {
             if (! $app->stash( '__cached_fileinfo' ) ) {
-                $data = $app->stash( 'fileinfo' );
-                $data = '';
                 $key = $app->stash( '__cached_fileinfo_key' );
                 if ( $data ) {
-                    $this->put( $key, $data );
+                    $template;
+                    if ( $template_id = $data->template_id ) {
+                        require_once( 'class.mt_template.php' );
+                        $template = new Template;
+                        $template->Load( "template_id = $template_id" );
+                    }
+                    $this->put( $key, $data, $template );
                 } else {
                     if ( $path = $app->config( 'DynamicCacheIfNonMatchFI' ) ) {
                         if ( $blog = $ctx->stash( 'blog' ) ) {
@@ -384,8 +468,50 @@ class DynamicCacheSQLite extends MTPlugin {
                 }
             }
         }
+        if ( $data ) {
+            if ( $archive_obj = $app->config( 'DynamicCacheArchiveObjects' ) ) {
+                $obj_lifetime = $app->config( 'DynamicCacheArchiveObjectLifeTime' );
+                $archive_objs = explode( ',', $archive_obj );
+                $app->stash( '__cache_archive_objs', $archive_objs );
+                if ( preg_grep( "/^entry$/", $archive_objs ) || preg_grep( "/^page$/", $archive_objs ) ) {
+                    if ( $entry_id = $data->entry_id ) {
+                        if ( $entry = $this->get( 'entry_' . $entry_id, $obj_lifetime ) ) {
+                            $ctx->stash( 'entry', $entry );
+                        } else {
+                            $app->stash( '__cache_entry', 1 );
+                        }
+                    }
+                }
+                if ( preg_grep( "/^category$/", $archive_objs ) ) {
+                    if ( $category_id = $data->category_id ) {
+                        if ( $category = $this->get( 'category_' . $category_id, $obj_lifetime ) ) {
+                            $ctx->stash( 'category', $category );
+                        } else {
+                            $app->stash( '__cache_category', 1 );
+                        }
+                    }
+                }
+                if (! $app->user() ) {
+                    if ( preg_grep( "/^author$/", $archive_objs ) ) {
+                        if ( $author_id = $data->author_id ) {
+                            if ( $author = $this->get( 'author_' . $author_id, $obj_lifetime ) ) {
+                                $ctx->stash( 'author', $author );
+                            } else {
+                                $app->stash( '__cache_author', 1 );
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if ( $this->debug ) {
             echo  '<br />------------------------<br />';
+        }
+    }
+
+    function build_page ( $mt, $ctx, $args, &$content ) {
+        if ( $this->debug ) {
+            $content = '';
         }
     }
 
@@ -396,6 +522,23 @@ class DynamicCacheSQLite extends MTPlugin {
         $app = $this->app;
         if ( $key = $app->stash( '__cache_content' ) ) {
             $this->put( $key, $content );
+        }
+        if ( $app->stash( '__cache_entry' ) ) {
+            if ( $entry = $ctx->stash( 'entry' ) ) {
+                $this->put( 'entry_' . $entry->id, $entry );
+            }
+        }
+        if ( $app->stash( '__cache_category' ) ) {
+            if ( $entry = $ctx->stash( 'category' ) ) {
+                $this->put( 'category_' . $category->id, $category );
+            }
+        }
+        if ( $app->stash( '__cache_author' ) ) {
+            if (! $app->user() ) {
+                if ( $author = $ctx->stash( 'author' ) ) {
+                    $this->put( 'author_' . $author->id, $author );
+                }
+            }
         }
         if ( $app->stash( '__sqlite_update' ) ) {
             sqlite_query( $this->sqlite, 'COMMIT' );
