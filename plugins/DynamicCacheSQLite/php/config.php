@@ -8,7 +8,7 @@ class DynamicCacheSQLite extends MTPlugin {
         'key'  => 'dynamiccachesqlite',
         'author_name' => 'Alfasado Inc.',
         'author_link' => 'http://alfasado.net/',
-        'version' => '1.0',
+        'version' => '1.01',
         'config_settings' => array(
             'DynamicCacheSQLite' => array( 'default' => '/psth/to/DynamicMTML.sqlite' ),
             'DynamicCacheLifeTime' => array( 'default' => 7200 ),
@@ -84,7 +84,8 @@ class DynamicCacheSQLite extends MTPlugin {
                 $this->clear( 'blog_1' );
                 $this->clear( 'fileinfo_a92e923d40abf7b3a6d6e1fed33f899a' );
                 $this->clear( 'content_9ba37e0a8d5b7dc333c8ae0822e9d22e' );
-                sqlite_query( $this->sqlite, 'COMMIT' );
+                sqlite_query( $conn, 'COMMIT' );
+                sqlite_close( $conn );
                 exit();
                 */
             }
@@ -103,7 +104,7 @@ class DynamicCacheSQLite extends MTPlugin {
             $filemtime = filemtime( $file );
             $app->stash( '__file_filemtime', $filemtime );
             if ( $app->config( 'DynamicCacheConditional' ) ) {
-                $app->do_conditional( $filemtime );
+                $this->do_conditional( $filemtime );
             }
         }
         if ( $app->config( 'DynamicCacheContent' ) ) {
@@ -119,7 +120,7 @@ class DynamicCacheSQLite extends MTPlugin {
                 } else {
                     if ( $filemtime ) {
                         if ( $app->config( 'DynamicCacheConditional' ) ) {
-                            $app->do_conditional( $filemtime );
+                            $this->do_conditional( $filemtime );
                         }
                     }
                     $content = $rows[ 'value' ];
@@ -127,6 +128,7 @@ class DynamicCacheSQLite extends MTPlugin {
                     $contenttype = $app->get_mime_type( $extension );
                     $app->send_http_header( $contenttype, $filemtime, strlen( $content ) );
                     echo $content;
+                    sqlite_close( $this->sqlite );
                     exit();
                 }
             }
@@ -541,6 +543,39 @@ class DynamicCacheSQLite extends MTPlugin {
         }
         sqlite_close( $this->sqlite );
     }
+
+    function do_conditional ( $ts ) {
+        $app = $this->app;
+        if ( $app->request_method == 'POST' ) {
+            return;
+        }
+        if ( $mode = $app->mode() ) {
+            if ( $mode == 'logout' ) {
+                return;
+            }
+        }
+        $if_modified  = isset( $_SERVER[ 'HTTP_IF_MODIFIED_SINCE' ] )
+                        ? strtotime( stripslashes( $_SERVER[ 'HTTP_IF_MODIFIED_SINCE' ] ) ) : FALSE;
+        $if_nonematch = isset( $_SERVER[ 'HTTP_IF_NONE_MATCH' ] )
+                        ? stripslashes( $_SERVER[ 'HTTP_IF_NONE_MATCH' ] ) : FALSE;
+        $conditional;
+        $last_modified = gmdate( "D, d M Y H:i:s", $ts ) . ' GMT';
+        $etag = '"' . md5( $last_modified ) . '"';
+        if ( $if_nonematch && ( $if_nonematch == $etag ) ) {
+        } else {
+            return;
+        }
+        if ( $if_modified && ( $if_modified >= $ts ) ) {
+        } else {
+            return;
+        }
+        header( "Last-Modified: $last_modified" );
+        header( "ETag: $etag" );
+        header( $app->protocol . ' 304 Not Modified' );
+        sqlite_close( $this->sqlite );
+        exit();
+    }
+
 }
 
 ?>
