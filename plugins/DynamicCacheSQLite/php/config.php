@@ -10,7 +10,7 @@ class DynamicCacheSQLite extends MTPlugin {
         'author_link' => 'http://alfasado.net/',
         'version' => '1.01',
         'config_settings' => array(
-            'DynamicCacheSQLite' => array( 'default' => '/psth/to/DynamicMTML.sqlite' ),
+            'DynamicCacheSQLite' => array( 'default' => '/path/to/DynamicMTML.sqlite' ),
             'DynamicCacheLifeTime' => array( 'default' => 7200 ),
             'DynamicCacheFileInfo' => array( 'default' => 1 ),
             'DynamicCacheBlog' => array( 'default' => 1 ),
@@ -22,6 +22,8 @@ class DynamicCacheSQLite extends MTPlugin {
             'DynamicCacheTableName' => array( 'default' => 'session' ),
             'DynamicCacheDebugMode' => array( 'default' => 0 ),
             'DynamicCacheIfNonMatchFI' => array( 'default' => 'index.html' ),
+            'DynamicCacheVacuumPeriod' => array( 'default' => 0 ),
+            'DynamicCacheVacuumCheckFile' => array( 'default' => '/path/to/CheckFile' ),
         ),
         'callbacks' => array(
             'init_app' => 'init_app',
@@ -66,6 +68,25 @@ class DynamicCacheSQLite extends MTPlugin {
                     $result_flag = sqlite_query( $conn, $sql, SQLITE_BOTH, $error );
                     if ( $error ) {
                         return;
+                    }
+                } else {
+                    if ( $period = $app->config( 'DynamicCacheVacuumPeriod' ) ) {
+                        $check = $app->config( 'DynamicCacheVacuumCheckFile' );
+                        if (! file_exists( $check ) ) {
+                            touch( $check );
+                        }
+                        if ( file_exists( $check ) ) {
+                            $checkmtime = filemtime( $check );
+                            if ( ( $checkmtime + $period ) > time() ) {
+                                touch( $check );
+                                $result_flag = sqlite_query( $conn, 'VACUUM', SQLITE_BOTH, $error );
+                                if ( $error ) {
+                                    return;
+                                }
+                                sqlite_close( $conn );
+                                $conn = sqlite_open( $db, 0666, $error );
+                            }
+                        }
                     }
                 }
                 $this->sqlite = $conn;
@@ -230,7 +251,6 @@ class DynamicCacheSQLite extends MTPlugin {
                 }
                 if ( $type == 'SER' ) {
                     $object_class = $rows[ 'object_class' ];
-                    
                     if ( $object_class ) {
                         require_once( 'class.' . $object_class . '.php' );
                     }
