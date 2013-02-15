@@ -11,11 +11,11 @@ class DynamicCacheSQLite extends MTPlugin {
         'version' => '1.01',
         'config_settings' => array(
             'DynamicCacheSQLite' => array( 'default' => '/path/to/DynamicMTML.sqlite' ),
-            'DynamicCacheLifeTime' => array( 'default' => 7200 ),
+            'DynamicCacheLifeTime' => array( 'default' => 14400 ),
             'DynamicCacheFileInfo' => array( 'default' => 1 ),
             'DynamicCacheBlog' => array( 'default' => 1 ),
             'DynamicCacheArchiveObjects' => array( 'default' => '' ),
-            'DynamicCacheArchiveObjectLifeTime' => array( 'default' => 1800 ),
+            'DynamicCacheArchiveObjectLifeTime' => array( 'default' => 7200 ),
             'DynamicCacheConditional' => array( 'default' => 1 ),
             'DynamicCacheContent' => array( 'default' => 1 ),
             'DynamicCacheContentLifeTime' => array( 'default' => 3600 ),
