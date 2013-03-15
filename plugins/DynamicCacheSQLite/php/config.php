@@ -8,7 +8,7 @@ class DynamicCacheSQLite extends MTPlugin {
         'key'  => 'dynamiccachesqlite',
         'author_name' => 'Alfasado Inc.',
         'author_link' => 'http://alfasado.net/',
-        'version' => '1.01',
+        'version' => '1.02',
         'config_settings' => array(
             'DynamicCacheSQLite' => array( 'default' => '/path/to/DynamicMTML.sqlite' ),
             'DynamicCacheLifeTime' => array( 'default' => 14400 ),
@@ -54,12 +54,12 @@ class DynamicCacheSQLite extends MTPlugin {
             if (! $do ) {
                 return NULL;
             }
-            $create;
+            $create = 0;
             if (! file_exists( $db ) ) {
                 $create = 1;
             }
             if ( $conn = sqlite_open( $db, 0666, $error ) ) {
-                if ( $create ) {
+                if ( $create ===1 ) {
                     $table = $app->config( 'DynamicCacheTableName' );
                     $sql = "CREATE table ${table} (key TEXT(255) PRIMARY KEY,";
                     $sql .= " value MEDIUMBLOB, template MEDIUMBLOB, type TEXT(25),";
@@ -368,7 +368,6 @@ class DynamicCacheSQLite extends MTPlugin {
         $app = $this->app;
         $args = $app->get_args();
         $app->stash( '__sqlite_key', $key );
-        $app->stash( '__sqlite_expires', $expires );
         $app->stash( '__sqlite_do', 1 );
         $app->run_callbacks( 'pre_sqlite_clear' );
         $do = $app->stash( '__sqlite_do' );
